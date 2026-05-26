@@ -65,15 +65,26 @@ Your context / behavior prompt: "${systemPrompt}"
 User's input: "${userInput}"
 
 Your tasks:
-1. Formulate a natural, conversational response in Japanese AS "${partnerCharacter}". Keep your Japanese conversation response short (1 or 2 sentences max) to maintain realistic dialogue rhythm.
-2. Provide a clean Romaji transcript of your Japanese response.
-3. Provide a friendly Spanish translation of your Japanese response.
-4. Evaluate the user's Japanese input ("${userInput}"). Is it natural? Are there grammar, spelling, or particle errors? Provide:
+1. Formulate a natural, conversational response AS "${partnerCharacter}". Keep your primary response short to maintain realistic dialogue rhythm.
+   CRITICAL DIRECTIVE FOR SPANISH QUESTIONS AND DIALOGUE:
+   - If the student asks you questions in Spanish, or chats/practices in Spanish (e.g. asking about Japanese culture, vocabulary differences like 'wa' vs 'ga', how to formulate a phrase, or grammatical explanations), you MUST resolve their question fully, clearly, and comprehensively in SPANISH in 'characterReplySpanish' and/or 'characterReply' without ever leaving the roleplay character as Sakura Sensei.
+   - For Spanish questions, you should provide BOTH alternatives or options if appropriate:
+     * A rich, helpful educational explanation in Spanish (placed inside 'characterReplySpanish')
+     * A clear set of Japanese example sentences/phrases representing the answer (placed inside 'characterReply') along with their Romaji pronunciation (in 'characterReplyRomaji')
+   - Never say 'I can only talk in Japanese' or refuse. Answer their inquiry inside the context of Sakura Sensei (who is proud of Colombia 🇨🇴, loves café, etc.), ensuring the student learns.
+
+2. Provide a clean Romaji transcript of your Japanese response inside 'characterReplyRomaji'.
+3. Provide a friendly Spanish translation/explanation of your response inside 'characterReplySpanish'.
+4. Translate and transcribe the user's own input ("${userInput}"):
+    - Provide 'userRomaji': The Romaji pronunciation reading of the user's input if they wrote in Japanese. If they wrote/asked in Spanish, provide the Romaji pronunciation of the closest Japanese translation/equivalent of their input.
+    - Provide 'userSpanish': The clean Spanish translation/meaning of the user's input if they wrote in Japanese. If the user wrote/asked in Spanish, just return the user's Spanish input itself.
+5. Evaluate the user's input ("${userInput}"). Is it natural? Are there grammar, spelling, or particle errors? Provide:
     - isNatural: true if the user's input is grammatically correct and natural for this scenario, false otherwise.
-    - score: a rating between 0 and 100 on their input. Give 100 for perfectly natural input, or adjust down based on mistakes.
+    - score: a rating between 0 and 100 on their input. Give 100 for perfectly natural input, or adjust down based on mistakes. If user asked a question in Spanish, rate their Spanish query kindly (typically high score, like 90-100) or provide constructive tips about the Japanese they asked about.
     - corrections: short advice or specific grammar/word correction if they made mistakes, in Spanish. Keep it empty/null if no corrections are needed.
     - naturalAlternative: a more natural way to write or say the user's response in Japanese (using correct Kanji/Kana), or null if their input was already perfect.
     - explanation: a concise linguistic tip in Spanish (max 2-3 sentences) explaining the correction, particles, or why the natural alternative is better, so they learn.
+6. Provide a detailed dynamic breakdown ("characterBreakdown") of EVERY single key Japanese word, particle, symbol, or logical unit inside the 'characterReply' so the student can learn their individual pronunciation and Spanish translation. Break it down so that the entire 'characterReply' is fully accounted for.
 
 Here is the conversation history for context:
 ${JSON.stringify(messageHistory || [])}
@@ -101,7 +112,28 @@ Now, generate the response in the specified JSON structure.`
               },
               characterReplySpanish: {
                 type: Type.STRING,
-                description: "Spanish translation of the character's reply."
+                description: "Spanish translation/explanation of the character's reply."
+              },
+              userRomaji: {
+                type: Type.STRING,
+                description: "The Romaji pronunciation guide for what the USER wrote/said in Japanese. If the user wrote in Spanish, provide the Romaji of its Japanese translation/equivalent."
+              },
+              userSpanish: {
+                type: Type.STRING,
+                description: "The Spanish translation / meaning of what the USER wrote/said in Japanese. If the user wrote in Spanish, echo their Spanish input."
+              },
+              characterBreakdown: {
+                type: Type.ARRAY,
+                description: "A chronological list of every word, particle, or logical unit in 'characterReply', mapping each to its pronunciation and translation.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    japanese: { type: Type.STRING, description: "The Japanese character(s) or word, e.g. '私' or 'は' or 'ビール' or 'ください'" },
+                    romaji: { type: Type.STRING, description: "The correct pronunciation / romaji reading of this part, e.g. 'watashi' or 'wa' or 'bīru' or 'kudasai'" },
+                    spanish: { type: Type.STRING, description: "The Spanish translation / meaning / grammatical function of this part, e.g. 'Yo' or '(partícula de tema)' or 'cerveza' or 'por favor'" }
+                  },
+                  required: ["japanese", "romaji", "spanish"]
+                }
               },
               userFeedback: {
                 type: Type.OBJECT,
@@ -116,7 +148,7 @@ Now, generate the response in the specified JSON structure.`
                 required: ["isNatural", "score"]
               }
             },
-            required: ["characterReply", "characterReplyRomaji", "characterReplySpanish", "userFeedback"]
+            required: ["characterReply", "characterReplyRomaji", "characterReplySpanish", "userRomaji", "userSpanish", "characterBreakdown", "userFeedback"]
           }
         }
       });

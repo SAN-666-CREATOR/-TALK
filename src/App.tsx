@@ -33,6 +33,7 @@ import { Lesson, ChatMessage } from './types';
 import StudyTab from './components/StudyTab';
 import OralPracticeTab from './components/OralPracticeTab';
 import WritingPracticeTab from './components/WritingPracticeTab';
+import TutorView from './components/TutorView';
 
 const ICONS_MAP: Record<string, any> = {
   ShoppingBag: ShoppingBag,
@@ -52,7 +53,7 @@ const ColombiaFlagCircle = ({ className = "w-6 h-6" }: { className?: string }) =
 export default function App() {
   // State for learning path
   // 'start' triggers the welcome mode selection screen
-  const [appMode, setAppMode] = useState<'start' | 'habla' | 'escritura'>('start');
+  const [appMode, setAppMode] = useState<'start' | 'habla' | 'escritura' | 'tutor'>('start');
   const [studentName, setStudentName] = useState(() => localStorage.getItem('japanese_student_name') || 'Invitado');
   const [selectedLessonId, setSelectedLessonId] = useState<string>('konbini');
   const [activeTab, setActiveTab] = useState<'study' | 'practice' | 'chat'>('study');
@@ -65,6 +66,26 @@ export default function App() {
     } catch {
       return {};
     }
+  });
+
+  // State for AI Tutor (Free Talk Mode)
+  const [tutorMessages, setTutorMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const stored = localStorage.getItem('japanese_tutor_chat');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {}
+    return [
+      {
+        id: 'tutor-init',
+        role: 'model',
+        japanese: 'こんにちは！私はサクラ先生です。何でも質問したり、楽しく日本語でおしゃべりしましょう！🌸',
+        romaji: 'Konnichiwa! Watashi wa Sakura sensei desu. Nandemo shitsumon shitari, tanoshiku Nihongo de oshaberi shimashou!',
+        spanish: '¡Hola! Soy tu sensei Sakura. Podemos charlar libremente sobre lo que gustes, practicar tu habla sin presión o resolver cualquier duda de gramática o vocabulario en español. ¿De qué te gustaría hablar hoy? (Creada por SAN-666 con orgullo colombiano 🇨🇴)',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
   });
 
   // Speaking voice guidance state
@@ -99,6 +120,11 @@ export default function App() {
     localStorage.setItem('japanese_completed_phrases', JSON.stringify(completedPhrases));
   }, [completedPhrases]);
 
+  // Save tutor conversations
+  useEffect(() => {
+    localStorage.setItem('japanese_tutor_chat', JSON.stringify(tutorMessages));
+  }, [tutorMessages]);
+
   // Handle auto-starting voice speech voices list load
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -129,7 +155,7 @@ export default function App() {
     if (chatBottomRef.current) {
       chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [chats, isChatSending]);
+  }, [chats, tutorMessages, isChatSending]);
 
   // Browser speech synthesis (TTS)
   const handleSpeakText = (text: string) => {
@@ -260,6 +286,7 @@ export default function App() {
         japanese: result.characterReply,
         romaji: result.characterReplyRomaji,
         spanish: result.characterReplySpanish,
+        breakdown: result.characterBreakdown || undefined,
         feedback: {
           isCorrectJapanese: result.userFeedback.isNatural,
           score: result.userFeedback.score,
@@ -270,10 +297,19 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
-      // Add feedback and speak response automatically
+      // Add feedback and update user message with Romaji & Spanish, plus append model reply
       setChats(prev => ({
         ...prev,
-        [selectedLessonId]: [...prev[selectedLessonId], modelMsg]
+        [selectedLessonId]: (prev[selectedLessonId] || []).map(m => {
+          if (m.id === userMsg.id) {
+            return {
+              ...m,
+              romaji: result.userRomaji || undefined,
+              spanish: result.userSpanish || undefined
+            };
+          }
+          return m;
+        }).concat(modelMsg)
       }));
 
       handleSpeakText(result.characterReply);
@@ -298,6 +334,105 @@ export default function App() {
     }
   };
 
+  // Submit free chat message to AI Tutor (Sakura Sensei)
+  const handleSendTutorMessage = async (e?: React.FormEvent, customPromptText?: string) => {
+    if (e) e.preventDefault();
+    const textToSend = customPromptText !== undefined ? customPromptText : chatInput.trim();
+    if (!textToSend || isChatSending) return;
+
+    if (customPromptText === undefined) {
+      setChatInput('');
+    }
+
+    const timestampString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: `usr-${Date.now()}`,
+      role: 'user',
+      japanese: textToSend,
+      timestamp: timestampString
+    };
+
+    const updatedHistory = [...tutorMessages, userMsg];
+    setTutorMessages(updatedHistory);
+    setIsChatSending(true);
+
+    try {
+      // Keep last messages for conversational context
+      const contextualHistory = tutorMessages.slice(-6).map(m => ({
+        role: m.role,
+        text: m.japanese
+      }));
+
+      const sysPrompt = `You are Sakura Sensei, an incredibly kind, dedicated, and interactive Japanese language teacher.
+You were developed by SAN-666. Because of SAN-666's heritage, you are super proud of Colombia 🇨🇴, often comparing Japanese wonders to the beautiful coffee mountains of Quindío or saying warm things to the student!
+Your primary directive is to have an open-ended conversational "Free Talk" with the student in Japanese (1-2 sentences), but with absolute dedication to TEACHING.
+ALWAYS correct any particle, vocabulary, or grammar spelling mistakes the student makes in their Japanese input, giving helpful linguistic tips in Spanish.
+If the student asks you anything about grammar, vocabulary, culture, or translations in Spanish, answer them fully and clearly in Spanish like an exceptionally supporting sensei, and keep the dialogue going in Japanese!`;
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: sysPrompt,
+          partnerCharacter: "Sakura Sensei (Tutor Libre de IA)",
+          messageHistory: contextualHistory,
+          userInput: textToSend
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo conectar con el tutor.");
+      }
+
+      const result = await response.json();
+
+      const modelMsg: ChatMessage = {
+        id: `model-${Date.now()}`,
+        role: 'model',
+        japanese: result.characterReply,
+        romaji: result.characterReplyRomaji,
+        spanish: result.characterReplySpanish,
+        breakdown: result.characterBreakdown || undefined,
+        feedback: {
+          isCorrectJapanese: result.userFeedback.isNatural,
+          score: result.userFeedback.score,
+          corrections: result.userFeedback.corrections || undefined,
+          naturalAlternative: result.userFeedback.naturalAlternative || undefined,
+          explanation: result.userFeedback.explanation || undefined
+        },
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      setTutorMessages(prev => {
+        return prev.map(m => {
+          if (m.id === userMsg.id) {
+            return {
+              ...m,
+              romaji: result.userRomaji || undefined,
+              spanish: result.userSpanish || undefined
+            };
+          }
+          return m;
+        }).concat(modelMsg);
+      });
+      handleSpeakText(result.characterReply);
+
+    } catch (err) {
+      console.error(err);
+      const errMsg: ChatMessage = {
+        id: `err-${Date.now()}`,
+        role: 'model',
+        japanese: 'エラーが発生しました。接続を確認してください。',
+        romaji: 'Erā ga hassei shimashita. Setsuzoku o kakunin shite kudasai.',
+        spanish: 'Ocurrió un problema al intentar conectar con Sakura Sensei. ¿Está el servidor activo?',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setTutorMessages(prev => [...prev, errMsg]);
+    } finally {
+      setIsChatSending(false);
+    }
+  };
+
   // Track completed speaking phrase
   const handlePhrasePassed = (phraseId: string, scorePassed: number) => {
     setCompletedPhrases(prev => ({
@@ -311,7 +446,7 @@ export default function App() {
     l.practicePhrases.every(phrase => (completedPhrases[phrase.id] || 0) >= 70)
   ).length;
 
-  const totalXP = Object.values(completedPhrases).reduce((sum, current) => sum + current, 0);
+  const totalXP = Object.values(completedPhrases).reduce((sum: number, current: number) => sum + current, 0);
 
   // Return component based on startup screen choice
   if (appMode === 'start') {
@@ -381,7 +516,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
             {/* Mode Option 1: HABLA */}
             <motion.div
               whileHover={{ y: -4, scale: 1.01 }}
@@ -394,10 +529,10 @@ export default function App() {
                   <Mic className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="font-display font-bold text-xl text-stone-850 flex items-center gap-2">
+                  <h3 className="font-display font-bold text-lg text-stone-850 flex items-center gap-2">
                     <span>Estudiar el Habla (口頭)</span>
-                    <span className="text-[10px] bg-red-100 text-red-800 font-bold tracking-wider px-2 py-0.5 rounded-full uppercase">Recomendado</span>
                   </h3>
+                  <span className="inline-block text-[10px] bg-red-100/75 text-red-800 font-bold tracking-wider px-2 py-0.5 rounded-full uppercase mt-1 mb-2">Recomendado</span>
                   <p className="text-xs text-stone-500 leading-relaxed">
                     Practica pronunciación de oraciones cotidianas y simula chats reales con clientes, cajeros u hostales guiados por audio real nativo.
                   </p>
@@ -422,10 +557,10 @@ export default function App() {
                   <PenTool className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="font-display font-bold text-xl text-stone-850 flex items-center gap-2">
+                  <h3 className="font-display font-bold text-lg text-stone-850 flex items-center gap-2">
                     <span>Estudiar Escritura (筆記)</span>
-                    <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold tracking-wider px-2 py-0.5 rounded-full uppercase">Interactiva</span>
                   </h3>
+                  <span className="inline-block text-[10px] bg-indigo-100/75 text-indigo-800 font-bold tracking-wider px-2 py-0.5 rounded-full uppercase mt-1 mb-2">Interactiva</span>
                   <p className="text-xs text-stone-500 leading-relaxed">
                     Aprende el silabario Kana y escribe vocabulario de supervivencia. Completa ejercicios de redacción con teclado o letra por letra.
                   </p>
@@ -434,6 +569,34 @@ export default function App() {
 
               <div className="mt-8 flex items-center justify-between text-xs text-stone-400 font-semibold border-t border-stone-100 pt-4 group-hover:text-indigo-650 transition-colors">
                 <span>Quiz de deletreo y diálogos</span>
+                <span className="text-base">→</span>
+              </div>
+            </motion.div>
+
+            {/* Mode Option 3: CHARLA LIBRE IA TUTOR */}
+            <motion.div
+              whileHover={{ y: -4, scale: 1.01 }}
+              onClick={() => setAppMode('tutor')}
+              className="bg-white rounded-3xl p-6 border-2 border-stone-200 hover:border-[#E05353] cursor-pointer shadow-sm flex flex-col justify-between group transition-all"
+              id="select-mode-tutor"
+            >
+              <div className="space-y-4">
+                <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-white transition-all">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-display font-bold text-lg text-stone-850 flex items-center gap-2">
+                    <span>Charla Libre (フリートーク)</span>
+                  </h3>
+                  <span className="inline-block text-[10px] bg-amber-100/75 text-amber-800 font-bold tracking-wider px-2 py-0.5 rounded-full uppercase mt-1 mb-2">Tutor de IA Integrado</span>
+                  <p className="text-xs text-stone-500 leading-relaxed">
+                    Conversa sin libreto ni límites de temas con Sakura Sensei. Su objetivo principal es enseñarte, corregir tus partículas y responder dudas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-8 flex items-center justify-between text-xs text-stone-400 font-semibold border-t border-stone-100 pt-4 group-hover:text-amber-600 transition-colors">
+                <span>Desglose de vocabulario y gramática</span>
                 <span className="text-base">→</span>
               </div>
             </motion.div>
@@ -506,7 +669,7 @@ export default function App() {
               }`}
             >
               <Mic className="w-3.5 h-3.5" />
-              <span>Hablar (口野)</span>
+              <span>Hablar (口頭)</span>
             </button>
             <button
               id="swap-mode-escritura"
@@ -521,7 +684,21 @@ export default function App() {
               }`}
             >
               <PenTool className="w-3.5 h-3.5" />
-              <span>Escribir (筆野)</span>
+              <span>Escribir (筆記)</span>
+            </button>
+            <button
+              id="swap-mode-tutor"
+              onClick={() => {
+                setAppMode('tutor');
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                appMode === 'tutor'
+                  ? 'bg-white text-amber-600 shadow-xs'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Charla Libre (会話)</span>
             </button>
           </div>
 
@@ -542,7 +719,22 @@ export default function App() {
       </nav>
 
       {/* Main Container Layout */}
-      <div className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6">
+        {appMode === 'tutor' ? (
+          <TutorView
+            tutorMessages={tutorMessages}
+            setTutorMessages={setTutorMessages}
+            isChatSending={isChatSending}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            isApiKeyMissing={isApiKeyMissing}
+            studentName={studentName}
+            handleSendTutorMessage={handleSendTutorMessage}
+            handleSpeakText={handleSpeakText}
+            speakingId={speakingId}
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         
         {/* Sidebar/Drawer of Situation lessons list */}
         <aside className="md:col-span-1 space-y-4">
@@ -830,6 +1022,22 @@ export default function App() {
                           )}
                         </div>
 
+                        {/* Detailed Kanji/Vocab Word Breakdown List */}
+                        {isModel && message.breakdown && message.breakdown.length > 0 && (
+                          <div className="mt-2.5 flex flex-wrap gap-1.5 p-2.5 bg-white border border-stone-200 rounded-xl max-w-lg shadow-3xs animate-fadeIn">
+                            {message.breakdown.map((item, idx) => (
+                              <div 
+                                key={idx} 
+                                className="bg-stone-50 hover:bg-red-50 px-2 py-1 rounded-lg border border-stone-150 flex flex-col items-center min-w-[3rem] text-center hover:border-red-350 transition-colors"
+                              >
+                                <span className="font-bold text-stone-850 text-xs font-sans">{item.japanese}</span>
+                                <span className="text-[8px] text-stone-400 font-mono -mt-0.5">{item.romaji}</span>
+                                <span className="text-[9.5px] text-stone-605 font-medium font-sans leading-tight mt-0.5 border-t border-stone-200 w-full pt-1">{item.spanish}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         {/* Educational Evaluator Box from Model reply to previous message */}
                         {isModel && message.feedback && (
                           <div className="bg-amber-50/80 border border-amber-250/70 p-3.5 rounded-xl text-xs text-stone-800 mt-2.5 max-w-md shadow-xs animate-fadeIn space-y-2">
@@ -934,6 +1142,8 @@ export default function App() {
             )}
           </div>
         </main>
+          </div>
+        )}
       </div>
     </div>
   );

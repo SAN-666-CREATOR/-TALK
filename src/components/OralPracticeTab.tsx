@@ -272,7 +272,7 @@ export default function OralPracticeTab({ lesson, onSpeak, speakingId, onPhraseP
               <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p>{errorMsg}</p>
-                {!SpeechRecognition && (
+                {typeof window !== 'undefined' && !((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) && (
                   <form onSubmit={handleManualSubmit} className="mt-2.5 flex gap-2">
                     <input
                       type="text"

@@ -41,12 +41,19 @@ export interface Lesson {
   initialMessageSpanish: string;
 }
 
+export interface WordBreakdownItem {
+  japanese: string;
+  romaji: string;
+  spanish: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'system' | 'user' | 'model';
   japanese: string;
   romaji?: string;
   spanish?: string;
+  breakdown?: WordBreakdownItem[];
   feedback?: {
     isCorrectJapanese: boolean;
     corrections?: string;
